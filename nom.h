@@ -118,7 +118,7 @@ typedef enum {
 } Nom_LogLevel;
 
 typedef struct {
-    char* Items;
+    char** Items;
     u32 Count;
     u32 Size;
 } Nom_Cmd;
@@ -174,7 +174,7 @@ void __Nom_CmdAppend(Nom_Cmd* cmd, ...);
 
 void Nom_ShowCmd(Nom_Cmd cmd, Nom_SB* sb);
 
-#define Nom_CmdRun(cmd) Nom_CmdRun_Async(Nom_Cmd cmd);
+#define Nom_CmdRun(cmd) Nom_CmdRun_Sync(cmd)
 
 Pid Nom_CmdRun_Async(Nom_Cmd cmd);
 int Nom_CmdRun_Sync(Nom_Cmd cmd);
@@ -549,13 +549,13 @@ _Bool Nom_Exist(const char* Path) {
 // ------------------------------------------
 
 void __Nom_Log(Nom_LogLevel level, const char* msg, ...) {
-    char Prefix[8] = {0};
+    char Prefix[9] = {0};
     char Out[1000] = {0};
 
     switch (level) {
-        case LOG_LEVEL_ERROR: memcpy(Prefix, "[ERROR] ", 8); break;
-        case LOG_LEVEL_WARN: memcpy(Prefix, "[WARN ] ", 8); break;
-        case LOG_LEVEL_INFO: memcpy(Prefix, "[INFO ] ", 8); break;
+        case LOG_LEVEL_ERROR: memcpy(Prefix, "[ERROR] ", 9); break;
+        case LOG_LEVEL_WARN: memcpy(Prefix, "[WARN ] ", 9); break;
+        case LOG_LEVEL_INFO: memcpy(Prefix, "[INFO ] ", 9); break;
     }
 
     va_list args;
@@ -563,7 +563,7 @@ void __Nom_Log(Nom_LogLevel level, const char* msg, ...) {
         vsnprintf(Out, 1000, msg, args);
     va_end(args);
 
-    char FinalOut[1000] = {0};
+    char FinalOut[1010] = {0};
     sprintf(FinalOut, "%s%s\n", Prefix, Out);
     printf(FinalOut);
 }
@@ -595,9 +595,13 @@ const char* __Nom_ConcatSep(const char Sep, ...) {
     Nom_SB sb = {0};
 
     va_list args;
+    i32 i = 0;
+
     VA_ARGS_FOREACH(args, Str, const char*, Sep, {
+        if (i != 0) SB_APPEND(&sb, Sep);
         SB_APPEND_CSTR(&sb, Str);
-        SB_APPEND(&sb, Sep);
+
+        i += 1;
     })
 
     SB_APPEND_NULL(&sb);
@@ -608,16 +612,14 @@ const char* __Nom_ConcatSep(const char Sep, ...) {
 void __Nom_CmdAppend(Nom_Cmd* cmd, ...) {
     va_list args;
     VA_ARGS_FOREACH(args, arg, const char*, cmd, {
-        while (*arg != '\0') {
-            DA_APPEND(cmd, *arg);
-            arg += 1;
-        }
+        DA_APPEND(cmd, arg);
     })
 }
 
 void Nom_ShowCmd(Nom_Cmd cmd, Nom_SB* sb) {
     for (int i = 0; i < cmd.Count; i++) {
-        SB_APPEND(sb, cmd.Items[i]);
+        SB_APPEND_CSTR(sb, cmd.Items[i]);
+        SB_APPEND(sb, ' ');
     }
 
     SB_APPEND_NULL(sb);
@@ -666,15 +668,11 @@ Pid Nom_CmdRun_Async(Nom_Cmd cmd) {
             return NOM_INVALID_PID;
         }
 
-        Nom_SB ExecName = {0};
-
-        for (int i = 0; (sb.Items[i] != ' ') || (sb.Items[i] != '\0'); i++) {
-            SB_APPEND(&ExecName, sb.Items[i]);
-        }
-
-        if (execvp(ExecName.Items, (char* const*)sb.Items) < 0) {
-            NOM_ERROR("Failed to run child process: %i, Error: %s", ChildPid, strerror(errno));
-            exit(126);
+        if (ChildPid == 0) {
+            if (execvp(cmd.Items[0], (char* const*)cmd.Items) < 0) {
+                NOM_ERROR("Failed to run child process: %i, Error: %s", ChildPid, strerror(errno));
+                exit(126);
+            }
         }
 
         return ChildPid;
